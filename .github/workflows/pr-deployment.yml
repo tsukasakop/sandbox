@@ -2,14 +2,15 @@ name: PR Deployment Status
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [labeled, unlabeled]
 
 permissions:
   deployments: write
   contents: read
 
 jobs:
-  deploy:
+  deploy-dev:
+    if: github.event.action == 'labeled' && github.event.label.name == 'deploy-preview'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -41,9 +42,8 @@ jobs:
               state: 'in_progress'
             });
 
-      # ここに実際のデプロイ処理が入る想定（今回はダミー）
       - name: Fake deploy step
-        run: echo "deploying..."
+        run: echo "deploying to dev..."
 
       - name: Set status to success
         uses: actions/github-script@v7
@@ -56,3 +56,77 @@ jobs:
               state: 'success',
               environment_url: 'https://example.com/pr-${{ github.event.pull_request.number }}'
             });
+
+  deploy-stage:
+    if: github.event.action == 'labeled' && github.event.label.name == 'deploy-stage'
+    runs-on: ubuntu-latest
+    environment: stage
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create deployment
+        uses: actions/github-script@v7
+        id: deployment
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.payload.pull_request.head.sha,
+              environment: 'stage',
+              auto_merge: false,
+              required_contexts: []
+            });
+            return deployment.data.id;
+
+      - name: Set status to in_progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.result }},
+              state: 'in_progress'
+            });
+
+      - name: Fake deploy step
+        run: echo "deploying to stage..."
+
+      - name: Set status to success
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.result }},
+              state: 'success',
+              environment_url: 'https://example.com/stage'
+            });
+
+  teardown:
+    if: github.event.action == 'unlabeled'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark deployment inactive
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const envName = context.payload.label.name === 'deploy-stage'
+              ? 'stage'
+              : `pr-${context.payload.pull_request.number}`;
+            const deployments = await github.rest.repos.listDeployments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              environment: envName
+            });
+            for (const d of deployments.data) {
+              await github.rest.repos.createDeploymentStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: d.id,
+                state: 'inactive'
+              });
+            }
