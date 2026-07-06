@@ -59,7 +59,7 @@ jobs:
               repo: context.repo.repo,
               deployment_id: ${{ steps.deployment.outputs.result }},
               state: 'success',
-              environment_url: 'https://example.com/pr-${{ github.event.pull_request.number }}'
+              environment_url: 'https://example.com/dev/pr-${{ github.event.pull_request.number }}'
             });
 
   preview-stage:
